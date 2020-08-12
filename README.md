@@ -1,0 +1,6 @@
+本文讲述的是2D分割。如何使用分割网络分割jpg格式文件。
+
+评价采用了miou,hd,dice等指标
+
+文件夹里需要创建weights_liver,weights_tumor两份文件夹
+上述文件夹下均包含epoch_10,epoch_20文件夹
