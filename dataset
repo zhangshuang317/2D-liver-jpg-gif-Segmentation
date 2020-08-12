@@ -1,0 +1,53 @@
+import torch.utils.data as data
+import PIL.Image as Image
+import os
+
+def make_dataset(root,mode):
+    # imgs = []
+    # n = len(os.listdir(root)) // 2
+    # for i in range(n):
+    #     img = os.path.join(root, "%03d.png"%i)
+    #     mask = os.path.join(root, "%03d_mask.jpg" % i)
+    #     imgs.append((img, mask))
+    # return imgs
+    imgs = []
+    img_list = os.walk(root)
+    for root, dirs, files in img_list:
+        file_paths = files
+    for idx in range(len(file_paths)):
+        name_list = file_paths[idx].split("_")
+        mask_name = "liver_" + name_list[1] + "_" + name_list[2].split(".")[0] + ".gif"
+        # mask_name = "tumor_" + name_list[1] + "_" + name_list[2].split(".")[0] + ".gif"
+
+        if mode == "train":
+            mask_path = "/home/liqi/Desktop/liver/train/train1_masks_liver/" + mask_name
+            # mask_path = "/home/liqi/Desktop/liver/train/train1_masks_tumor/" + mask_name
+
+            img_path = "/home/liqi/Desktop/liver/train/train1/" + file_paths[idx]
+            imgs.append((img_path, mask_path))
+        else:
+            mask_path = "/home/liqi/Desktop/liver/test/test1_masks_liver/" + mask_name
+            # mask_path = "/home/liqi/Desktop/liver/test/test1_masks_tumor/" + mask_name
+
+            img_path = "/home/liqi/Desktop/liver/test/test1/" + file_paths[idx]
+            imgs.append((img_path, mask_path))
+    return imgs
+
+
+class LiverDataset(data.Dataset):
+    def __init__(self, root, transform=None, target_transform=None,mode=None):
+        imgs = make_dataset(root,mode)
+        self.imgs = imgs
+        self.transform = transform
+        self.target_transform = target_transform
+    def __getitem__(self, index):
+        x_path, y_path = self.imgs[index]
+        origin_x = Image.open(x_path)
+        origin_y = Image.open(y_path)
+        if self.transform is not None:
+            img_x = self.transform(origin_x)
+        if self.target_transform is not None:
+            img_y = self.target_transform(origin_y)
+        return img_x, img_y
+    def __len__(self):
+        return len(self.imgs)
