@@ -1,0 +1,125 @@
+import numpy as np
+import torch
+import argparse
+from torch.utils.data import DataLoader
+from torch import autograd, optim
+from torchvision.transforms import transforms
+from unet import Unet
+from dataset import LiverDataset
+from metric import *
+import os
+import cv2
+import PIL.Image as Image
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+device = torch.device("cuda")
+
+def get_data(i,mode):
+    import dataset
+    imgs = dataset.make_dataset(r"/home/liqi/Desktop/liver/test/test1/",mode)
+    imgx = []
+    imgy = []
+    for img in imgs:
+        imgx.append(img[0])
+        imgy.append(img[1])
+    return imgx[i], imgy[i]
+
+
+def train_model(model, criterion, optimizer, dataload, num_epochs=20):
+    for epoch in range(num_epochs):
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('-' * 10)
+        dt_size = len(dataload.dataset)
+        epoch_loss = 0
+        step = 0
+        for x, y in dataload:
+            step += 1
+            inputs = x.to(device)
+            labels = y.to(device)
+            # zero the parameter gradients
+            optimizer.zero_grad()
+            # forward
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            print("%d/%d,train_loss:%0.3f" % (step, (dt_size - 1) // dataload.batch_size + 1, loss.item()))
+        print("epoch %d loss:%0.3f" % (epoch, epoch_loss))
+    torch.save(model.state_dict(), r'/home/liqi/Desktop/liver_segmentation/weights_liver/epoch_20/weights_unet.pth')
+    # torch.save(model.state_dict(), r'/home/liqi/Desktop/liver_segmentation/weights_tumor/epoch_20/weights_unet.pth')
+
+    return model
+
+
+# ÑµÁ·Ä£ÐÍ
+def Train():
+    model = Unet(3, 1).to(device)
+    batch_size = args.batch_size
+    criterion = torch.nn.BCELoss()
+    optimizer = optim.Adam(model.parameters())
+    liver_dataset = LiverDataset(r"/home/liqi/Desktop/liver/train/train1/", transform=x_transforms,
+                                 target_transform=y_transforms,mode="train")
+    dataloaders = DataLoader(liver_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_model(model, criterion, optimizer, dataloaders)
+
+
+# ÏÔÊ¾Ä£ÐÍµÄÊä³ö½á¹û
+def Test():
+    model = Unet(3, 1).to(device)  # unetÊäÈëÊÇÈýÍ¨µÀ£¬Êä³öÊÇÒ»Í¨µÀ£¬ÒòÎª²»ËãÉÏ±³¾°Ö»ÓÐ¸ÎÔàÒ»¸öÀà±ð
+    model.load_state_dict(torch.load(args.ckp, map_location='cpu'))  # ÔØÈëÑµÁ·ºÃµÄÄ£ÐÍ
+    liver_dataset = LiverDataset(r"/home/liqi/Desktop/liver/test/test1/", transform=x_transforms,
+                                 target_transform=y_transforms,mode="test")
+    dataloaders = DataLoader(liver_dataset, batch_size=1)
+    model.eval()
+    import matplotlib.pyplot as plt
+    plt.ion()  # ¿ªÆô¶¯Ì¬Ä£Ê½
+
+    with torch.no_grad():
+        i = 0  # ÑéÖ¤¼¯ÖÐµÚiÕÅÍ¼
+        miou_total = 0
+        dice_total = 0
+        hd_total = 0
+        num = len(dataloaders)  # ÑéÖ¤¼¯Í¼Æ¬µÄ×ÜÊý
+        for x, _ in dataloaders:
+            x = x.to(device)
+            y = model(x)
+
+            img_y = torch.squeeze(
+                y).cpu().numpy()  # ÊäÈëËðÊ§º¯ÊýÖ®Ç°Òª°ÑÔ¤²âÍ¼±ä³Énumpy¸ñÊ½£¬ÇÒÎªÁË¸úÑµÁ·Í¼¶ÔÓ¦£¬Òª¶îÍâ¼Ó¶àÒ»Î¬±íÊ¾batchsize
+            mask = get_data(i,mode="test")[1]  # µÃµ½µ±Ç°maskµÄÂ·¾¶
+            miou_total += get_iou(mask, img_y)  # »ñÈ¡µ±Ç°Ô¤²âÍ¼µÄmiou£¬²¢¼Óµ½×ÜmiouÖÐ
+            hd_total += get_hd(mask, img_y)
+            dice_total += get_dice(mask, img_y)
+            plt.subplot(121)
+            plt.imshow(Image.open(get_data(i,mode="test")[0]))
+            plt.subplot(122)
+            plt.imshow(img_y)
+            plt.pause(0.01)
+            if i < num: i += 1  # ´¦ÀíÑéÖ¤¼¯ÏÂÒ»ÕÅÍ¼
+        plt.show()
+        print('Miou=%f | hd=%f | Dice=%f' % (miou_total / 31 , hd_total / 31 , dice_total / 31))
+
+if __name__ == "__main__":
+    x_transforms = transforms.Compose([
+        transforms.ToTensor(),  # -> [0,1]
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # ->[-1,1]
+    ])
+
+    # maskÖ»ÐèÒª×ª»»Îªtensor
+    y_transforms = transforms.ToTensor()
+
+    # ²ÎÊý½âÎöÆ÷,ÓÃÀ´½âÎö´ÓÖÕ¶Ë¶ÁÈ¡µÄÃüÁî
+    parse = argparse.ArgumentParser()
+    # parse = argparse.ArgumentParser()
+    parse.add_argument("--action", type=str, help="train or test", default="train")
+    parse.add_argument("--batch_size", type=int, default=2)
+    parse.add_argument("--ckp", type=str, help="the path of model weight file",default=r"/home/liqi/Desktop/liver_segmentation/weights_liver/epoch_20/weights_unet.pth")
+    # parse.add_argument("--ckp", type=str, help="the path of model weight file",default=r"/home/liqi/Desktop/liver_segmentation/weights_tumor/epoch_20/weights_unet.pth")
+
+    args = parse.parse_args()
+    # train
+    Train()        #²âÊÔÊ±£¬¾Í°Ñ´Ëtrain()Óï¾ä×¢ÊÍµô
+
+    # test()
+    Test()
